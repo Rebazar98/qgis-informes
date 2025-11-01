@@ -70,4 +70,3 @@ def render(
         )
 
     return FileResponse(outpath, media_type="application/pdf", filename=f"informe_{refcat}.pdf")
-
