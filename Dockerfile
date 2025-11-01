@@ -12,21 +12,17 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu-core && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Variables que ayudan a que QGIS funcione en contenedor
-ENV QT_QPA_PLATFORM=offscreen
-ENV QGIS_PREFIX_PATH=/usr
-ENV LC_ALL=C.UTF-8 LANG=C.UTF-8
-
 # App
 WORKDIR /app
 COPY proyecto.qgz /app/proyecto.qgz
 COPY app.py /app/app.py
 
 # Python web
-RUN pip3 install --no-cache-dir fastapi uvicorn[standard] pydantic
+RUN pip3 install fastapi uvicorn[standard] pydantic
 
-# Railway inyecta PORT; no fijamos un valor fijo aquí
+# Expón el puerto (Railway suele usar 8000, pero leeremos $PORT)
 EXPOSE 8000
 
-# Ejecutamos el módulo Python para que respete el PORT del entorno
-CMD ["python3", "/app/app.py"]
+# MUY IMPORTANTE: usa el puerto que ponga Railway en $PORT.
+# Con shell form podemos expandir la variable.
+CMD bash -lc 'uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}'
