@@ -1,40 +1,47 @@
-import os, subprocess
-from fastapi import FastAPI, HTTPException
+import os, tempfile, subprocess
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-api = FastAPI()
-QGZ = "/app/proyecto.qgz"
-LAYOUT = "Informe"   # nombre EXACTO de tu layout en QGIS
+app = FastAPI(title="QGIS Informe Urbanístico")
 
-def run_qgis(refcat, wkt_parcela, wkt_detalle):
-    out_pdf = f"/app/out/informe_{refcat}.pdf"
-    subs = f"refcat={refcat},wkt_extent_parcela={wkt_parcela},wkt_extent_detalle={wkt_detalle}"
+QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
+QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT", "INFORME")  # pon el nombre exacto del layout
+
+@app.get("/render")
+def render(
+    refcat: str = Query(..., min_length=3),
+    wkt_extent_parcela: str | None = None,
+    wkt_extent_detalle: str | None = None
+):
+    # Fichero temporal PDF
+    fd, outpath = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+
+    # Variables de proyecto (para que tu layout las recoja)
+    var_args: list[str] = []
+    def push_var(k, v):
+        var_args.extend(["--project-variables", f"{k}={v}"])
+
+    push_var("refcat", refcat)
+    if wkt_extent_parcela: push_var("wkt_extent_parcela", wkt_extent_parcela)
+    if wkt_extent_detalle: push_var("wkt_extent_detalle", wkt_extent_detalle)
+
+    # qgis_process exporta el layout a PDF (xvfb-run para headless)
     cmd = [
-        "qgis_process","run","qgis:exportlayoutaspdf",
-        "--","PROJECT_PATH="+QGZ,
-        "LAYOUT="+LAYOUT,
-        "DPI=300","GEOREFERENCE=false","EXPORT_METADATA=false",
-        "OUTPUT="+out_pdf,
-        "--","SUBSTITUTE_VARIABLES="+subs
-    ]
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"qgis_process error: {e}")
+        "xvfb-run","-a","qgis_process","run","qgis:exportprintlayoutaspdf",
+        "--",
+        f"PROJECT_PATH={QGIS_PROJECT}",
+        f"LAYOUT={QGIS_LAYOUT}",
+        "DPI=300",
+        "FORCE_VECTOR_OUTPUT=false",
+        "GEOREFERENCE=true",
+        f"OUTPUT={outpath}",
+    ] + var_args
 
-    if not os.path.exists(out_pdf):
-        raise HTTPException(status_code=500, detail="PDF no generado")
+    run = subprocess.run(cmd, capture_output=True, text=True)
+    if run.returncode != 0 or not os.path.exists(outpath):
+        raise HTTPException(500, f"QGIS falló:\nSTDOUT:\n{run.stdout}\n\nSTDERR:\n{run.stderr}")
 
-    return out_pdf
-
-@api.post("/render")
-def render(payload: dict):
-    try:
-        refcat = payload["refcat"]
-        wkt_parcela = payload["wkt_extent_parcela"]
-        wkt_detalle = payload["wkt_extent_detalle"]
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=f"Falta campo: {e}")
-
-    pdf_path = run_qgis(refcat, wkt_parcela, wkt_detalle)
-    return FileResponse(pdf_path, media_type="application/pdf", filename=os.path.basename(pdf_path))
+    # Devuelve el PDF
+    filename = f"informe_{refcat}.pdf"
+    return FileResponse(outpath, media_type="application/pdf", filename=filename)
