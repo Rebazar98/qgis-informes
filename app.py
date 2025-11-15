@@ -1,17 +1,12 @@
-import os
-import tempfile
-import subprocess
-import shlex
-
+import os, tempfile, subprocess, shlex
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 
 app = FastAPI(title="QGIS Informe Urbanístico")
 
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
-QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
+QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "INFORME")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34
-
 
 def run_proc(cmd: list[str]) -> tuple[int, str, str]:
     env = os.environ.copy()
@@ -32,10 +27,7 @@ def qgis_info():
 def list_algos(filter: str | None = None):
     code, out, err = run_proc(["qgis_process", "list"])
     if code != 0:
-        return PlainTextResponse(
-            f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
-            status_code=500
-        )
+        return PlainTextResponse(f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}", status_code=500)
     if filter:
         lines = [ln for ln in out.splitlines() if filter.lower() in ln.lower()]
         return PlainTextResponse("\n".join(lines) or "(sin coincidencias)")
@@ -46,10 +38,7 @@ def list_algos(filter: str | None = None):
 def algo_help(algo: str = "native:printlayouttopdf"):
     code, out, err = run_proc(["qgis_process", "help", algo])
     if code != 0:
-        return PlainTextResponse(
-            f"ERROR help {algo}:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
-            status_code=500
-        )
+        return PlainTextResponse(f"ERROR help {algo}:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}", status_code=500)
     return PlainTextResponse(out)
 
 
@@ -62,13 +51,13 @@ def health():
 def render(
     refcat: str = Query(..., min_length=3),
     wkt_extent_parcela: str | None = None,
-    wkt_extent_detalle: str | None = None,
+    wkt_extent_detalle: str | None = None
 ):
     # Comprobación rápida de que el proyecto existe
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
-            content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
+            content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT}
         )
 
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
@@ -77,9 +66,9 @@ def render(
     # Variables de proyecto (Variables del diseño en QGIS)
     var_args: list[str] = []
 
-    def push_var(k, v):
-        # Usamos --project_variables (con underscore), varias veces
-        var_args.extend(["--project_variables", f"{k}={v}"])
+    def push_var(k: str, v: str):
+        # opciones globales de qgis_process para variables de proyecto
+        var_args.extend(["--project-variables", f"{k}={v}"])
 
     push_var("refcat", refcat)
     if wkt_extent_parcela:
@@ -87,24 +76,23 @@ def render(
     if wkt_extent_detalle:
         push_var("wkt_extent_detalle", wkt_extent_detalle)
 
-    # El proyecto y las variables se pasan como opciones de qgis_process run
+    # Comando qgis_process:
+    #   qgis_process run <ALG> -- PARAMS... --PROJECT_PATH=/app/proyecto.qgz [--project-variables ...]
     cmd = [
-        "xvfb-run",
-        "-a",
+        "xvfb-run", "-a",
         "qgis_process",
-        "run",
-        QGIS_ALGO,
+        "run", QGIS_ALGO,
         "--",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
         "FORCE_VECTOR_OUTPUT=false",
         "GEOREFERENCE=true",
         f"OUTPUT={outpath}",
-        "--project_path",
-        QGIS_PROJECT,
+        f"--PROJECT_PATH={QGIS_PROJECT}",
     ] + var_args
 
     code, out, err = run_proc(cmd)
+
     if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
         return JSONResponse(
             status_code=500,
@@ -119,5 +107,5 @@ def render(
     return FileResponse(
         outpath,
         media_type="application/pdf",
-        filename=f"informe_{refcat}.pdf",
+        filename=f"informe_{refcat}.pdf"
     )
