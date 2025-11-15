@@ -2,12 +2,13 @@ import os
 import tempfile
 import subprocess
 import shlex
-from typing import List, Tuple   # <<< COMPATIBLE CON PYTHON 3.8
+from typing import List, Tuple
 
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 app = FastAPI(title="QGIS Informe Urbanístico")
+
 
 @app.get("/health")
 def health():
@@ -61,3 +62,18 @@ def render(refcat: str = Query(..., min_length=3)):
         media_type="application/pdf",
         filename=f"informe_{refcat}.pdf",
     )
+
+
+@app.get("/test-proyecto")
+def test_proyecto():
+    """
+    Ejecuta render_basico.py para verificar que el proyecto QGIS se carga correctamente.
+    """
+    code, out, err = run_proc([
+        "xvfb-run", "-a", "qgis", "--nologo", "--code", "render_basico.py"
+    ])
+    return {
+        "code": code,
+        "stdout": out,
+        "stderr": err,
+    }
