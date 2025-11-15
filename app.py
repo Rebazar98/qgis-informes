@@ -9,13 +9,14 @@ app = FastAPI(title="QGIS Informe Urbanístico")
 
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
-QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34
+QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34+
 
 def run_proc(cmd: list[str]) -> tuple[int, str, str]:
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     env.setdefault("XDG_RUNTIME_DIR", "/tmp/runtime-root")
     os.makedirs(env["XDG_RUNTIME_DIR"], exist_ok=True)
+
     p = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout, p.stderr
 
@@ -72,27 +73,33 @@ def render(
     wkt_extent_parcela: str | None = None,
     wkt_extent_detalle: str | None = None,
 ):
-    # De momento refcat no se usa como variable de proyecto,
-    # solo para el nombre del archivo de salida.
-
+    # 1) Comprobar que el proyecto existe
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
             content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
         )
 
+    # 2) Crear fichero temporal de salida
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Sintaxis correcta:
-    # qgis_process run --project_path=/app/proyecto.qgz native:printlayouttopdf -- LAYOUT=... OUTPUT=...
+    # 3) (Opcional) variables de proyecto -> de momento NO las pasamos,
+    #    porque lo importante ahora es que cargue el proyecto.
+    #    Más adelante afinamos para que @refcat sea dinámico.
+    #    var_args: list[str] = []
+    #    def push_var(k, v): var_args.extend([f"--PROJECT_VARIABLES={k}={v}"])
+
+    # 4) Comando qgis_process
+    #    Ojo: algoritmo justo después de 'run',
+    #    luego --project_path=..., luego el separador "--"
     cmd = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
-        f"--project_path={QGIS_PROJECT}",
         QGIS_ALGO,
+        f"--project_path={QGIS_PROJECT}",
         "--",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
