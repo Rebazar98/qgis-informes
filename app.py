@@ -2,22 +2,35 @@ import os
 import tempfile
 import subprocess
 import shlex
+import json
+
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 
 app = FastAPI(title="QGIS Informe Urbanístico")
 
+# ⚙️ Config por variables de entorno (Railway)
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
-QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34+
+QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # de momento seguimos con este
 
-def run_proc(cmd: list[str]) -> tuple[int, str, str]:
+def run_proc(cmd: list[str], stdin: str | None = None) -> tuple[int, str, str]:
+    """
+    Ejecuta un comando con el entorno adecuado para QGIS en modo headless.
+    Si `stdin` no es None, se pasa como entrada estándar (para el modo JSON de qgis_process).
+    """
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     env.setdefault("XDG_RUNTIME_DIR", "/tmp/runtime-root")
     os.makedirs(env["XDG_RUNTIME_DIR"], exist_ok=True)
 
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        cmd,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     return p.returncode, p.stdout, p.stderr
 
 
@@ -73,54 +86,81 @@ def render(
     wkt_extent_parcela: str | None = None,
     wkt_extent_detalle: str | None = None,
 ):
-    # 1) Comprobar que el proyecto existe
+    """
+    Renderiza el layout a PDF usando qgis_process en modo JSON.
+
+    De momento:
+    - Usa el layout `QGIS_LAYOUT`
+    - Carga el proyecto `QGIS_PROJECT`
+    - NO pasa aún variables de proyecto (refcat lo usaremos más adelante
+      para filtros/atlas o para PostGIS).
+    """
+
+    # 1) Comprobar proyecto
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
-            content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
+            content={
+                "error": "Proyecto no encontrado",
+                "path": QGIS_PROJECT,
+            },
         )
 
-    # 2) Crear fichero temporal de salida
+    # 2) Salida temporal
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # 3) (Opcional) variables de proyecto -> de momento NO las pasamos,
-    #    porque lo importante ahora es que cargue el proyecto.
-    #    Más adelante afinamos para que @refcat sea dinámico.
-    #    var_args: list[str] = []
-    #    def push_var(k, v): var_args.extend([f"--PROJECT_VARIABLES={k}={v}"])
+    # 3) Construir payload JSON para qgis_process
+    #    Véase documentación: se pasa un objeto con "inputs" y "project_path"
+    inputs: dict[str, object] = {
+        "LAYOUT": QGIS_LAYOUT,
+        "DPI": 300,
+        "FORCE_VECTOR_OUTPUT": False,
+        "GEOREFERENCE": True,
+        "OUTPUT": outpath,
+    }
 
-    # 4) Comando qgis_process
-    #    Ojo: algoritmo justo después de 'run',
-    #    luego --project_path=..., luego el separador "--"
+    # (Extents en WKT – guardados por ahora, los usaremos más adelante)
+    if wkt_extent_parcela:
+        inputs["EXTENT_PARCELA"] = wkt_extent_parcela
+    if wkt_extent_detalle:
+        inputs["EXTENT_DETALLE"] = wkt_extent_detalle
+
+    payload = {
+        "inputs": inputs,
+        "project_path": QGIS_PROJECT,
+        # ⚠️ Más adelante podremos usar esto si confirmamos soporte:
+        # "project_variables": {"refcat": refcat},
+    }
+
+    payload_str = json.dumps(payload)
+
+    # 4) Comando qgis_process: modo JSON por stdin (el "-" final)
     cmd = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
         QGIS_ALGO,
-        f"--project_path={QGIS_PROJECT}",
-        "--",
-        f"LAYOUT={QGIS_LAYOUT}",
-        "DPI=300",
-        "FORCE_VECTOR_OUTPUT=false",
-        "GEOREFERENCE=true",
-        f"OUTPUT={outpath}",
+        "-",
     ]
 
-    code, out, err = run_proc(cmd)
+    code, out, err = run_proc(cmd, stdin=payload_str)
 
+    # 5) Control de errores
     if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
         return JSONResponse(
             status_code=500,
             content={
                 "error": "qgis_process failed",
                 "cmd": " ".join(shlex.quote(c) for c in cmd),
+                "stdin": payload,
                 "stdout": out,
                 "stderr": err,
             },
         )
 
+    # 6) Devolver PDF
     return FileResponse(
         outpath,
         media_type="application/pdf",
