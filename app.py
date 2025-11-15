@@ -12,6 +12,7 @@ QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34
 
+
 def run_proc(cmd: list[str]) -> tuple[int, str, str]:
     """
     Ejecuta un comando y devuelve (returncode, stdout, stderr)
@@ -96,20 +97,17 @@ def render(
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Construimos el comando qgis_process:
-    # qgis_process run --project-path /app/proyecto.qgz \
-    #   --project-variables refcat=XXXX \
-    #   native:printlayouttopdf -- LAYOUT=... OUTPUT=...
+    # Comando qgis_process CORREGIDO
     cmd = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
+        QGIS_ALGO,  # native:printlayouttopdf
         "--project-path",
         QGIS_PROJECT,
         "--project-variables",
         f"refcat={refcat}",
-        QGIS_ALGO,  # native:printlayouttopdf
         "--",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
@@ -117,10 +115,6 @@ def render(
         "GEOREFERENCE=true",
         f"OUTPUT={outpath}",
     ]
-
-    # (Opcional) si más adelante quieres pasar extents por variable de proyecto:
-    #   --project-variables f"refcat={refcat},wkt_extent_parcela={wkt_extent_parcela}"
-    # pero de momento solo usamos refcat.
 
     code, out, err = run_proc(cmd)
 
