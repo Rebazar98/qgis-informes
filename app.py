@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 app = FastAPI(title="QGIS Informe Urbanístico")
 
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
-QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "INFORME")
+QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34
 
 def run_proc(cmd: list[str]) -> tuple[int, str, str]:
@@ -20,14 +20,22 @@ def run_proc(cmd: list[str]) -> tuple[int, str, str]:
 @app.get("/qgis")
 def qgis_info():
     code, out, err = run_proc(["qgis_process", "--version"])
-    return {"qgis_process": "/usr/bin/qgis_process", "code": code, "stdout": out, "stderr": err}
+    return {
+        "qgis_process": "/usr/bin/qgis_process",
+        "code": code,
+        "stdout": out,
+        "stderr": err,
+    }
 
 
 @app.get("/algos", response_class=PlainTextResponse)
 def list_algos(filter: str | None = None):
     code, out, err = run_proc(["qgis_process", "list"])
     if code != 0:
-        return PlainTextResponse(f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}", status_code=500)
+        return PlainTextResponse(
+            f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
+            status_code=500,
+        )
     if filter:
         lines = [ln for ln in out.splitlines() if filter.lower() in ln.lower()]
         return PlainTextResponse("\n".join(lines) or "(sin coincidencias)")
@@ -38,36 +46,45 @@ def list_algos(filter: str | None = None):
 def algo_help(algo: str = "native:printlayouttopdf"):
     code, out, err = run_proc(["qgis_process", "help", algo])
     if code != 0:
-        return PlainTextResponse(f"ERROR help {algo}:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}", status_code=500)
+        return PlainTextResponse(
+            f"ERROR help {algo}:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
+            status_code=500,
+        )
     return PlainTextResponse(out)
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "project": QGIS_PROJECT, "layout": QGIS_LAYOUT, "algo": QGIS_ALGO}
+    return {
+        "status": "ok",
+        "project": QGIS_PROJECT,
+        "layout": QGIS_LAYOUT,
+        "algo": QGIS_ALGO,
+    }
 
 
 @app.get("/render")
 def render(
     refcat: str = Query(..., min_length=3),
     wkt_extent_parcela: str | None = None,
-    wkt_extent_detalle: str | None = None
+    wkt_extent_detalle: str | None = None,
 ):
-    # Comprobación rápida de que el proyecto existe
+    # 1. Comprobar que el proyecto existe
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
-            content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT}
+            content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
         )
 
+    # 2. Fichero temporal de salida
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Variables de proyecto (Variables del diseño en QGIS)
+    # 3. Variables de proyecto (Variables del diseño en QGIS)
     var_args: list[str] = []
 
     def push_var(k: str, v: str):
-        # opciones globales de qgis_process para variables de proyecto
+        # Opción global de qgis_process para variables de proyecto
         var_args.extend(["--project-variables", f"{k}={v}"])
 
     push_var("refcat", refcat)
@@ -76,19 +93,22 @@ def render(
     if wkt_extent_detalle:
         push_var("wkt_extent_detalle", wkt_extent_detalle)
 
-    # Comando qgis_process:
-    #   qgis_process run <ALG> -- PARAMS... --PROJECT_PATH=/app/proyecto.qgz [--project-variables ...]
+    # 4. Comando qgis_process:
+    #    qgis_process run native:printlayouttopdf \
+    #       project_path=/app/proyecto.qgz \
+    #       LAYOUT=... OUTPUT=... [otros parámetros]
     cmd = [
-        "xvfb-run", "-a",
+        "xvfb-run",
+        "-a",
         "qgis_process",
-        "run", QGIS_ALGO,
-        "--",
+        "run",
+        QGIS_ALGO,
+        f"project_path={QGIS_PROJECT}",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
         "FORCE_VECTOR_OUTPUT=false",
         "GEOREFERENCE=true",
         f"OUTPUT={outpath}",
-        f"--PROJECT_PATH={QGIS_PROJECT}",
     ] + var_args
 
     code, out, err = run_proc(cmd)
@@ -107,5 +127,5 @@ def render(
     return FileResponse(
         outpath,
         media_type="application/pdf",
-        filename=f"informe_{refcat}.pdf"
+        filename=f"informe_{refcat}.pdf",
     )
