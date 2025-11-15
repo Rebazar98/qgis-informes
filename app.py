@@ -2,6 +2,8 @@ import os
 import tempfile
 import subprocess
 import shlex
+from typing import List, Tuple   # <<< COMPATIBLE CON PYTHON 3.8
+
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
@@ -11,7 +13,8 @@ app = FastAPI(title="QGIS Informe Urbanístico")
 def health():
     return {"status": "ok", "mode": "script render.py"}
 
-def run_proc(cmd: list[str]) -> tuple[int, str, str]:
+
+def run_proc(cmd: List[str]) -> Tuple[int, str, str]:
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     env.setdefault("XDG_RUNTIME_DIR", "/tmp/runtime-root")
@@ -19,6 +22,7 @@ def run_proc(cmd: list[str]) -> tuple[int, str, str]:
 
     p = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout, p.stderr
+
 
 @app.get("/render")
 def render(refcat: str = Query(..., min_length=3)):
