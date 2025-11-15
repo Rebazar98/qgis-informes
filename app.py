@@ -26,9 +26,9 @@ def run_proc_json(algo: str, payload: dict) -> tuple[int, str, str]:
     )
     return p.returncode, p.stdout, p.stderr
 
-
 @app.get("/render")
 def render(refcat: str = Query(..., min_length=3)):
+
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
@@ -59,6 +59,8 @@ def render(refcat: str = Query(..., min_length=3)):
             status_code=500,
             content={
                 "error": "qgis_process failed (JSON mode)",
+                "refcat": refcat,
+                "project_variables": payload["project_variables"],
                 "json_payload": payload,
                 "stdout": out,
                 "stderr": err,
