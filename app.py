@@ -25,7 +25,10 @@ def qgis_info():
 def list_algos(filter: str | None = None):
     code, out, err = run_proc(["qgis_process", "list"])
     if code != 0:
-        return PlainTextResponse(f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}", status_code=500)
+        return PlainTextResponse(
+            f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
+            status_code=500,
+        )
     if filter:
         lines = [ln for ln in out.splitlines() if filter.lower() in ln.lower()]
         return PlainTextResponse("\n".join(lines) or "(sin coincidencias)")
@@ -35,7 +38,10 @@ def list_algos(filter: str | None = None):
 def algo_help(algo: str = "native:printlayouttopdf"):
     code, out, err = run_proc(["qgis_process", "help", algo])
     if code != 0:
-        return PlainTextResponse(f"ERROR help {algo}:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}", status_code=500)
+        return PlainTextResponse(
+            f"ERROR help {algo}:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
+            status_code=500,
+        )
     return PlainTextResponse(out)
 
 @app.get("/health")
@@ -46,45 +52,44 @@ def health():
 def render(
     refcat: str = Query(..., min_length=3),
     wkt_extent_parcela: str | None = None,
-    wkt_extent_detalle: str | None = None
+    wkt_extent_detalle: str | None = None,
 ):
     # Comprobación rápida de que el proyecto existe
     if not os.path.exists(QGIS_PROJECT):
-        return JSONResponse(status_code=500, content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT})
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
+        )
 
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # --- variables de proyecto que usará QGIS ---
-    # De momento solo necesitamos refcat. Si en el futuro
-    # quieres pasar más, se añaden aquí.
-    proj_vars = [f"refcat={refcat}"]
+    # --- variables de proyecto ---
+    project_vars = [f"refcat={refcat}"]
     if wkt_extent_parcela:
-        proj_vars.append(f"wkt_extent_parcela={wkt_extent_parcela}")
+        project_vars.append(f"wkt_extent_parcela={wkt_extent_parcela}")
     if wkt_extent_detalle:
-        proj_vars.append(f"wkt_extent_detalle={wkt_extent_detalle}")
+        project_vars.append(f"wkt_extent_detalle={wkt_extent_detalle}")
 
-    proj_vars_arg = ";".join(proj_vars)  # refcat=...;wkt_extent_parcela=...
-
-    # Comando qgis_process:
-    #   - cargamos proyecto con --project-path
-    #   - sobrescribimos variables de proyecto con --project-variables
-    #   - ejecutamos native:printlayouttopdf
+    # Comando qgis_process CORRECTO para 3.34
     cmd = [
-        "xvfb-run", "-a",
+        "xvfb-run",
+        "-a",
         "qgis_process",
-        "--project-path", QGIS_PROJECT,
-        "--project-variables", proj_vars_arg,
-        "run", QGIS_ALGO,
-        "--",
+        "run",
+        QGIS_ALGO,
+        f"PROJECT_PATH={QGIS_PROJECT}",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
         "FORCE_VECTOR_OUTPUT=false",
         "GEOREFERENCE=true",
         f"OUTPUT={outpath}",
+        "--project-variables",
+        ",".join(project_vars),
     ]
 
     code, out, err = run_proc(cmd)
+
     if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
         return JSONResponse(
             status_code=500,
@@ -96,4 +101,8 @@ def render(
             },
         )
 
-    return FileResponse(outpath, media_type="application/pdf", filename=f"informe_{refcat}.pdf")
+    return FileResponse(
+        outpath,
+        media_type="application/pdf",
+        filename=f"informe_{refcat}.pdf",
+    )
