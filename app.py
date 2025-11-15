@@ -10,8 +10,7 @@ app = FastAPI(title="QGIS Informe Urbanístico")
 # Puedes sobreescribir estas con variables de entorno en Railway
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
-QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34
-
+QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")  # QGIS 3.34+
 
 def run_proc(cmd: list[str]) -> tuple[int, str, str]:
     """
@@ -26,7 +25,6 @@ def run_proc(cmd: list[str]) -> tuple[int, str, str]:
     p = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout, p.stderr
 
-
 @app.get("/qgis")
 def qgis_info():
     code, out, err = run_proc(["qgis_process", "--version"])
@@ -37,7 +35,6 @@ def qgis_info():
         "stderr": err,
     }
 
-
 @app.get("/algos", response_class=PlainTextResponse)
 def list_algos(filter: str | None = None):
     code, out, err = run_proc(["qgis_process", "list"])
@@ -46,13 +43,10 @@ def list_algos(filter: str | None = None):
             f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
             status_code=500,
         )
-
     if filter:
         lines = [ln for ln in out.splitlines() if filter.lower() in ln.lower()]
         return PlainTextResponse("\n".join(lines) or "(sin coincidencias)")
-
     return PlainTextResponse(out)
-
 
 @app.get("/algohelp", response_class=PlainTextResponse)
 def algo_help(algo: str = "native:printlayouttopdf"):
@@ -64,7 +58,6 @@ def algo_help(algo: str = "native:printlayouttopdf"):
         )
     return PlainTextResponse(out)
 
-
 @app.get("/health")
 def health():
     return {
@@ -73,7 +66,6 @@ def health():
         "layout": QGIS_LAYOUT,
         "algo": QGIS_ALGO,
     }
-
 
 @app.get("/render")
 def render(
@@ -85,41 +77,35 @@ def render(
     Genera el PDF del plano urbanístico para la parcela cuyo refcat se pasa
     como parámetro. El refcat se manda a QGIS como variable de proyecto 'refcat'.
     """
-
-    # Comprobación rápida de que el proyecto existe
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
             content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
         )
 
-    # Fichero temporal de salida
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Comando qgis_process CORREGIDO
+    # QGIS 3.34+: usa PROJECT_PATH y PROJECT_VARIABLES después de "--"
     cmd = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
         QGIS_ALGO,  # native:printlayouttopdf
-        "--project-path",
-        QGIS_PROJECT,
-        "--project-variables",
-        f"refcat={refcat}",
         "--",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
         "FORCE_VECTOR_OUTPUT=false",
         "GEOREFERENCE=true",
+        f"PROJECT_PATH={QGIS_PROJECT}",
+        f"PROJECT_VARIABLES=refcat={refcat}",
         f"OUTPUT={outpath}",
     ]
 
     code, out, err = run_proc(cmd)
 
     if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
-        # Respuesta de debug si algo falla
         return JSONResponse(
             status_code=500,
             content={
@@ -130,7 +116,6 @@ def render(
             },
         )
 
-    # Devolvemos el PDF
     return FileResponse(
         outpath,
         media_type="application/pdf",
