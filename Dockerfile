@@ -24,23 +24,25 @@ ENV QT_QPA_PLATFORM=offscreen
 ENV XDG_RUNTIME_DIR=/tmp/runtime-root
 RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
 
-# Establecer el prefijo de QGIS para scripts
+# Prefijo QGIS y variables necesarias para scripts
 ENV QGIS_PREFIX_PATH=/usr
+ENV LD_LIBRARY_PATH=/usr/lib
 
 WORKDIR /app
 
-# Añadir el proyecto y scripts
+# Copiar archivos del proyecto
 COPY proyecto.qgz /app/proyecto.qgz
 COPY app.py /app/app.py
 COPY render.py /app/render.py
 COPY render_basico.py /app/render_basico.py
 
-# Dependencias Python
+# Instalar dependencias de Python
 RUN pip3 install --no-cache-dir fastapi uvicorn[standard] pydantic
 
-# Puerto expuesto por Railway
+# Puerto expuesto para Railway
 ENV PORT=8080
 EXPOSE 8080
 
-# Ejecutar el servidor
+# Ejecutar la aplicación
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+
