@@ -11,6 +11,7 @@ QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")
 
+
 def run_proc(cmd: list[str]) -> tuple[int, str, str]:
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -19,6 +20,7 @@ def run_proc(cmd: list[str]) -> tuple[int, str, str]:
 
     p = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout, p.stderr
+
 
 @app.get("/render")
 def render(refcat: str = Query(..., min_length=3)):
@@ -31,20 +33,19 @@ def render(refcat: str = Query(..., min_length=3)):
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # ✅ Orden correcto: primero el algoritmo, luego flags, luego "--" y parámetros
     cmd = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
-        QGIS_ALGO,  # native:printlayouttopdf PRIMERO
-        "--project-path", QGIS_PROJECT,
-        "--project-variables", f"refcat={refcat}",
+        QGIS_ALGO,
         "--",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
         "FORCE_VECTOR_OUTPUT=false",
         "GEOREFERENCE=true",
+        f"PROJECT_PATH={QGIS_PROJECT}",
+        f"PROJECT_VARIABLES=refcat={refcat}",
         f"OUTPUT={outpath}",
     ]
 
