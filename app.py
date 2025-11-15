@@ -24,6 +24,7 @@ def run_proc(cmd: list[str]) -> tuple[int, str, str]:
 
 @app.get("/render")
 def render(refcat: str = Query(..., min_length=3)):
+
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
@@ -33,19 +34,20 @@ def render(refcat: str = Query(..., min_length=3)):
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
+    # 💥 ESTA ES LA SINTAXIS QUE TU QGIS REALMENTE REQUIERE
     cmd = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
-        QGIS_ALGO,
+        QGIS_ALGO,   # native:printlayouttopdf
         "--",
         f"LAYOUT={QGIS_LAYOUT}",
         "DPI=300",
         "FORCE_VECTOR_OUTPUT=false",
         "GEOREFERENCE=true",
-        f"PROJECT_PATH={QGIS_PROJECT}",
-        f"PROJECT_VARIABLES=refcat={refcat}",
+        f"--PROJECT_PATH={QGIS_PROJECT}",
+        f"--PROJECT_VARIABLES=refcat={refcat}",
         f"OUTPUT={outpath}",
     ]
 
