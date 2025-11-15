@@ -1,23 +1,7 @@
-import os
-import tempfile
-import subprocess
-from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse
+QGIS_RENDER_SCRIPT = "render_basico.py"
 
-app = FastAPI(title="QGIS Informe Urbanístico")
-
-QGIS_RENDER_SCRIPT = "render.py"  # archivo que acabamos de crear
-QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
-QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
-
-@app.get("/render")
-def render(refcat: str = Query(..., min_length=3)):
-    if not os.path.exists(QGIS_PROJECT):
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
-        )
-
+@app.get("/render_test")
+def render_test():
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
@@ -26,7 +10,6 @@ def render(refcat: str = Query(..., min_length=3)):
         "qgis",
         "--nologo",
         "--code", QGIS_RENDER_SCRIPT,
-        f"--refcat={refcat}",
         f"--output={outpath}"
     ]
 
@@ -41,8 +24,7 @@ def render(refcat: str = Query(..., min_length=3)):
         return JSONResponse(
             status_code=500,
             content={
-                "error": "qgis script failed",
-                "refcat": refcat,
+                "error": "render_basico falló",
                 "cmd": " ".join(cmd),
                 "stdout": proc.stdout,
                 "stderr": proc.stderr,
@@ -52,5 +34,5 @@ def render(refcat: str = Query(..., min_length=3)):
     return FileResponse(
         outpath,
         media_type="application/pdf",
-        filename=f"informe_{refcat}.pdf",
+        filename="test_export.pdf",
     )
