@@ -11,18 +11,23 @@ RUN apt-get update && apt-get install -y \
        fonts-dejavu-core \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Entorno gráfico offscreen
 ENV QT_QPA_PLATFORM=offscreen
 ENV XDG_RUNTIME_DIR=/tmp/runtime-root
 RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
 
 WORKDIR /app
 
+# ⬇️ Proyecto, datos y app
 COPY proyecto.qgz /app/proyecto.qgz
-COPY app.py       /app/app.py
+COPY parcela.gpkg  /app/parcela.gpkg   # ← asegúrate de que el nombre coincide
+COPY app.py        /app/app.py
 
+# Dependencias Python
 RUN pip3 install fastapi uvicorn[standard] pydantic
 
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["uvicorn","app:app","--host","0.0.0.0","--port","8080"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+
