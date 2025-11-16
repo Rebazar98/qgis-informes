@@ -2,6 +2,7 @@ import os
 import tempfile
 import subprocess
 import shlex
+import json
 from typing import List, Tuple, Optional
 
 from fastapi import FastAPI, Query
@@ -20,10 +21,15 @@ QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")
 
 
-def run_proc(cmd: List[str], extra_env: Optional[dict] = None) -> Tuple[int, str, str]:
+def run_proc(
+    cmd: List[str],
+    extra_env: Optional[dict] = None,
+    stdin_text: Optional[str] = None,
+) -> Tuple[int, str, str]:
     """
     Ejecuta un comando y devuelve (returncode, stdout, stderr)
     con las variables necesarias para modo offscreen.
+    Si se pasa stdin_text, se envía al proceso por stdin.
     """
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -33,7 +39,13 @@ def run_proc(cmd: List[str], extra_env: Optional[dict] = None) -> Tuple[int, str
     if extra_env:
         env.update(extra_env)
 
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    p = subprocess.run(
+        cmd,
+        input=stdin_text,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
     return p.returncode, p.stdout, p.stderr
 
 
@@ -104,21 +116,33 @@ def render(
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Comando qgis_process:
-    # Nota: el propio error indica que quiere "--PROJECT_PATH=xxx"
+    # 🔹 Payload JSON para qgis_process (modo stdin)
+    #   Esto sigue el patrón de la doc / issues oficiales:
+    #   {
+    #     "inputs": { "LAYOUT": "...", "OUTPUT": "..." },
+    #     "project_path": "/ruta/proyecto.qgz"
+    #   }
+    payload = {
+        "inputs": {
+            "LAYOUT": QGIS_LAYOUT,
+            "OUTPUT": outpath,
+            # Si luego quieres añadir DPI, etc., se pueden poner aquí:
+            # "DPI": 300,
+            # "FORCE_VECTOR_OUTPUT": False,
+            # "GEOREFERENCE": True,
+        },
+        "project_path": QGIS_PROJECT,
+    }
+    payload_json = json.dumps(payload)
+
+    # Comando qgis_process: leemos el JSON de stdin (el '-' final)
     cmd: List[str] = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
-        QGIS_ALGO,                         # native:printlayouttopdf
-        "--",                              # parámetros del algoritmo
-        f"--PROJECT_PATH={QGIS_PROJECT}",  # 👈 ruta al proyecto
-        f"--LAYOUT={QGIS_LAYOUT}",         # nombre del layout
-        "--DPI=300",
-        "--FORCE_VECTOR_OUTPUT=false",
-        "--GEOREFERENCE=true",
-        f"--OUTPUT={outpath}",
+        QGIS_ALGO,   # native:printlayouttopdf
+        "-",         # ← leer parámetros desde JSON por stdin
     ]
 
     # Variables de entorno:
@@ -127,7 +151,7 @@ def render(
         "REFCAT": refcat,
     }
 
-    code, out, err = run_proc(cmd, extra_env=extra_env)
+    code, out, err = run_proc(cmd, extra_env=extra_env, stdin_text=payload_json)
 
     # Si falla o el PDF está vacío, devolvemos info de debug
     if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
@@ -140,6 +164,7 @@ def render(
                 "stderr": err,
                 "output_exists": os.path.exists(outpath),
                 "output_size": os.path.getsize(outpath) if os.path.exists(outpath) else 0,
+                "payload": payload,  # para debug
             },
         )
 
