@@ -18,7 +18,8 @@ app = FastAPI(title="QGIS Planos por refcat")
 # 2️⃣ Configuración básica (sobrescribible con variables de entorno en Railway)
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
-QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")
+# 👇 IMPORTANTE: ahora usamos el algoritmo de atlas
+QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:atlaslayouttopdf")
 
 
 def run_proc(
@@ -86,7 +87,7 @@ def list_algos(filter: str | None = None):
 
 
 @app.get("/algohelp", response_class=PlainTextResponse)
-def algo_help(algo: str = "native:printlayouttopdf"):
+def algo_help(algo: str = "native:atlaslayouttopdf"):
     code, out, err = run_proc(["qgis_process", "help", algo])
     if code != 0:
         return PlainTextResponse(
@@ -117,19 +118,15 @@ def render(
     os.close(fd)
 
     # 🔹 Payload JSON para qgis_process (modo stdin)
-    #   Esto sigue el patrón de la doc / issues oficiales:
-    #   {
-    #     "inputs": { "LAYOUT": "...", "OUTPUT": "..." },
-    #     "project_path": "/ruta/proyecto.qgz"
-    #   }
+    #   Para native:atlaslayouttopdf la doc dice que los parámetros básicos son:
+    #   LAYOUT y OUTPUT; el atlas del propio layout se respeta tal cual. :contentReference[oaicite:2]{index=2}
     payload = {
         "inputs": {
             "LAYOUT": QGIS_LAYOUT,
             "OUTPUT": outpath,
-            # Si luego quieres añadir DPI, etc., se pueden poner aquí:
-            # "DPI": 300,
-            # "FORCE_VECTOR_OUTPUT": False,
-            # "GEOREFERENCE": True,
+            # Si quisieras SOBREESCRIBIR el filtro de atlas desde aquí:
+            # "FILTER_EXPRESSION": "\"refcat\" = env('REFCAT')",
+            # pero no hace falta porque ya lo tienes puesto en el layout.
         },
         "project_path": QGIS_PROJECT,
     }
@@ -141,12 +138,11 @@ def render(
         "-a",
         "qgis_process",
         "run",
-        QGIS_ALGO,   # native:printlayouttopdf
+        QGIS_ALGO,   # native:atlaslayouttopdf
         "-",         # ← leer parámetros desde JSON por stdin
     ]
 
-    # Variables de entorno:
-    # - REFCAT para el filtro del Atlas ("refcat" = env('REFCAT'))
+    # Variable de entorno para el filtro del Atlas ("refcat" = env('REFCAT'))
     extra_env = {
         "REFCAT": refcat,
     }
@@ -164,7 +160,7 @@ def render(
                 "stderr": err,
                 "output_exists": os.path.exists(outpath),
                 "output_size": os.path.getsize(outpath) if os.path.exists(outpath) else 0,
-                "payload": payload,  # para debug
+                "payload": payload,
             },
         )
 
