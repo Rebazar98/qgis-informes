@@ -12,10 +12,8 @@ from fastapi.responses import (
     JSONResponse,
 )
 
-# Crear la app
 app = FastAPI(title="QGIS Planos por refcat")
 
-# Configuración (sobrescribible con variables de entorno en Railway)
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:atlaslayouttopdf")
@@ -26,11 +24,6 @@ def run_proc(
     extra_env: Optional[dict] = None,
     stdin_text: Optional[str] = None,
 ) -> Tuple[int, str, str]:
-    """
-    Ejecuta un comando y devuelve (returncode, stdout, stderr)
-    con las variables necesarias para modo offscreen.
-    Si se pasa stdin_text, se envía al proceso por stdin.
-    """
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
     env.setdefault("XDG_RUNTIME_DIR", "/tmp/runtime-root")
@@ -86,56 +79,46 @@ def list_algos(filter: str | None = None):
 
 
 @app.get("/render")
-def render(
-    refcat: str = Query(..., min_length=3),
-):
+def render(refcat: str = Query(..., min_length=3)):
     """
-    Genera el PDF del atlas para la parcela cuyo refcat se pasa.
-    El layout tiene un atlas con filtro:
-        "refcat" = env('REFCAT')
-    Aquí solo seteamos REFCAT en el entorno.
+    Genera el PDF del atlas filtrando por el campo "refcat" de la capa de cobertura.
+    Usamos FILTER_EXPRESSION del algoritmo para limitar el atlas a esa parcela.
     """
 
-    # Comprobar que el proyecto existe
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
             content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
         )
 
-    # Fichero temporal de salida
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Payload JSON para qgis_process (modo stdin)
+    # Expresión de filtro que QGIS aplicará al atlas
+    filter_expr = f"\"refcat\" = '{refcat}'"
+
     payload = {
         "inputs": {
             "LAYOUT": QGIS_LAYOUT,
             "OUTPUT": outpath,
-            # El atlas usará su propia configuración (capa cobertura + filtro del layout)
+            "FILTER_EXPRESSION": filter_expr,
+            # Dejamos que use la capa de cobertura definida en el layout
         },
         "project_path": QGIS_PROJECT,
     }
     payload_json = json.dumps(payload)
 
-    # Comando qgis_process: leer parámetros desde JSON por stdin
     cmd: List[str] = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
         QGIS_ALGO,   # native:atlaslayouttopdf
-        "-",         # ← leer JSON de stdin
+        "-",         # parámetros vía JSON en stdin
     ]
 
-    # Variable de entorno REFCAT para el filtro del atlas en el layout
-    extra_env = {
-        "REFCAT": refcat,
-    }
+    code, out, err = run_proc(cmd, stdin_text=payload_json)
 
-    code, out, err = run_proc(cmd, extra_env=extra_env, stdin_text=payload_json)
-
-    # Si falla o el PDF está vacío, devolvemos info de debug
     if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
         return JSONResponse(
             status_code=500,
@@ -150,7 +133,6 @@ def render(
             },
         )
 
-    # Si todo va bien, devolvemos el PDF
     return FileResponse(
         outpath,
         media_type="application/pdf",
