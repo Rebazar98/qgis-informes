@@ -12,13 +12,12 @@ from fastapi.responses import (
     JSONResponse,
 )
 
-#1️⃣ Crear la app
+# Crear la app
 app = FastAPI(title="QGIS Planos por refcat")
 
-# 2️⃣ Configuración básica (sobrescribible con variables de entorno en Railway)
+# Configuración (sobrescribible con variables de entorno en Railway)
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
-# IMPORTANTE: usar el algoritmo de ATLAS
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:atlaslayouttopdf")
 
 
@@ -86,24 +85,15 @@ def list_algos(filter: str | None = None):
     return PlainTextResponse(out)
 
 
-@app.get("/algohelp", response_class=PlainTextResponse)
-def algo_help(algo: str = "native:atlaslayouttopdf"):
-    code, out, err = run_proc(["qgis_process", "help", algo])
-    if code != 0:
-        return PlainTextResponse(
-            f"ERROR help {algo}:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
-            status_code=500,
-        )
-    return PlainTextResponse(out)
-
-
 @app.get("/render")
 def render(
     refcat: str = Query(..., min_length=3),
 ):
     """
     Genera el PDF del atlas para la parcela cuyo refcat se pasa.
-    El filtro de atlas se pasa al algoritmo como FILTER_EXPRESSION.
+    El layout tiene un atlas con filtro:
+        "refcat" = env('REFCAT')
+    Aquí solo seteamos REFCAT en el entorno.
     """
 
     # Comprobar que el proyecto existe
@@ -117,18 +107,12 @@ def render(
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Expresión QGIS para filtrar la capa de cobertura:
-    # "refcat" = '4056301QJ3245N'
-    filter_expr = f"\"refcat\" = '{refcat}'"
-
     # Payload JSON para qgis_process (modo stdin)
     payload = {
         "inputs": {
             "LAYOUT": QGIS_LAYOUT,
             "OUTPUT": outpath,
-            "FILTER_EXPRESSION": filter_expr,
-            # Si quisieras limitar a 1 feature explícitamente:
-            # "FEATURE_LIMIT": 1,
+            # El atlas usará su propia configuración (capa cobertura + filtro del layout)
         },
         "project_path": QGIS_PROJECT,
     }
@@ -144,8 +128,10 @@ def render(
         "-",         # ← leer JSON de stdin
     ]
 
-    # Ya no necesitamos REFCAT como env; todo va en FILTER_EXPRESSION
-    extra_env = {}
+    # Variable de entorno REFCAT para el filtro del atlas en el layout
+    extra_env = {
+        "REFCAT": refcat,
+    }
 
     code, out, err = run_proc(cmd, extra_env=extra_env, stdin_text=payload_json)
 
