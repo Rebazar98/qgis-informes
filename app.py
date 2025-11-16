@@ -90,7 +90,7 @@ def render(
 ):
     """
     Genera el PDF del plano urbanístico para la parcela cuyo refcat se pasa.
-    El Atlas del layout debe tener el filtro: "refcat" = env('REFCAT')
+    En el layout, el Atlas debe tener el filtro:  "refcat" = env('REFCAT')
     """
 
     # Comprobar que el proyecto existe
@@ -104,7 +104,8 @@ def render(
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Comando qgis_process: pasamos PROJECT_PATH como parámetro del algoritmo
+    # Comando qgis_process:
+    # Nota: el propio error indica que quiere "--PROJECT_PATH=xxx"
     cmd: List[str] = [
         "xvfb-run",
         "-a",
@@ -112,20 +113,18 @@ def render(
         "run",
         QGIS_ALGO,                         # native:printlayouttopdf
         "--",                              # parámetros del algoritmo
-        f"PROJECT_PATH={QGIS_PROJECT}",    # proyecto QGIS
-        f"LAYOUT={QGIS_LAYOUT}",           # nombre del layout
-        "DPI=300",
-        "FORCE_VECTOR_OUTPUT=false",
-        "GEOREFERENCE=true",
-        f"OUTPUT={outpath}",
+        f"--PROJECT_PATH={QGIS_PROJECT}",  # 👈 ruta al proyecto
+        f"--LAYOUT={QGIS_LAYOUT}",         # nombre del layout
+        "--DPI=300",
+        "--FORCE_VECTOR_OUTPUT=false",
+        "--GEOREFERENCE=true",
+        f"--OUTPUT={outpath}",
     ]
 
     # Variables de entorno:
     # - REFCAT para el filtro del Atlas ("refcat" = env('REFCAT'))
-    # - QGIS_PROJECT_FILE es opcional, pero no molesta
     extra_env = {
         "REFCAT": refcat,
-        "QGIS_PROJECT_FILE": QGIS_PROJECT,
     }
 
     code, out, err = run_proc(cmd, extra_env=extra_env)
@@ -150,5 +149,3 @@ def render(
         media_type="application/pdf",
         filename=f"informe_{refcat}.pdf",
     )
-
-    
