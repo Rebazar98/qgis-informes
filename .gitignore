@@ -1,0 +1,4 @@
+ortofoto_muros.tif
+*.gpkg-wal
+*.gpkg-shm
+*.tif.aux.xml

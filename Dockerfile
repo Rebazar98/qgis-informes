@@ -17,9 +17,14 @@ RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
 
 WORKDIR /app
 
+# Descargar la ortofoto desde el Release de GitHub
+RUN curl -L "https://github.com/Rebazar98/qgis-informes/releases/download/v0.1.0/ortofoto_muros.tif" \
+    -o /app/ortofoto_muros.tif
+
+# Proyecto y datos vectoriales
 COPY proyecto.qgz  /app/proyecto.qgz
-COPY parcela.gpkg   /app/parcela.gpkg
-COPY app.py         /app/app.py
+COPY parcela.gpkg /app/parcela.gpkg
+COPY app.py       /app/app.py
 
 RUN pip3 install fastapi uvicorn[standard] pydantic
 
