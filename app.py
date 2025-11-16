@@ -6,20 +6,21 @@ import json
 from typing import List, Tuple, Optional
 
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 app = FastAPI(title="QGIS Planos por refcat")
 
+# Config desde variables de entorno (Railway) o por defecto
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
-QGIS_LAYOUT = os.getenv("QGIS_LAYOUT", "Plano_urbanistico_parcela")
-QGIS_ALGO = os.getenv("QGIS_ALGO", "native:atlaslayouttopdf")
+QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
+QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:atlaslayouttopdf")
 
 
 def run_proc(
     cmd: List[str],
     extra_env: Optional[dict] = None,
     stdin_text: Optional[str] = None,
-    timeout: int = 180,
+    timeout: int = 120,
 ) -> Tuple[int, str, str]:
     """
     Ejecuta un comando y devuelve (returncode, stdout, stderr)
@@ -44,6 +45,7 @@ def run_proc(
         )
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
+        # Devolvemos un código tipo 124 para identificar timeout
         return 124, e.stdout or "", (e.stderr or "") + "\n[TIMEOUT EXPIRED]"
 
 
@@ -57,40 +59,20 @@ def health():
     }
 
 
-@app.get("/qgis")
-def qgis_info():
-    code, out, err = run_proc(["qgis_process", "--version"])
-    return {
-        "code": code,
-        "stdout": out,
-        "stderr": err,
-    }
-
-
-@app.get("/algos", response_class=PlainTextResponse)
-def list_algos(filter: Optional[str] = None):
-    code, out, err = run_proc(["qgis_process", "list"])
-    if code != 0:
-        return PlainTextResponse(
-            f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
-            status_code=500,
-        )
-
-    if filter:
-        lines = [ln for ln in out.splitlines() if filter.lower() in ln.lower()]
-        return PlainTextResponse("\n".join(lines) or "(sin coincidencias)")
-
-    return PlainTextResponse(out)
-
-
 @app.get("/render")
 def render(
     refcat: str = Query(..., min_length=3),
-    debug: bool = Query(False),
+    debug: int = Query(0, description="Si !=0, devuelve JSON de debug en vez del PDF"),
 ):
     """
     Genera el PDF del atlas para la parcela cuyo refcat se pasa.
-    Si debug=1, devuelve siempre JSON con info detallada en vez de PDF.
+
+    En el proyecto QGIS, el atlas del layout debe tener:
+        - Capa cobertura = 'parcelas'
+        - Filtrar con = "refcat" = env('REFCAT')
+
+    Aquí solo seteamos la variable de entorno REFCAT y llamamos
+    a native:atlaslayouttopdf.
     """
 
     if not os.path.exists(QGIS_PROJECT):
@@ -99,23 +81,21 @@ def render(
             content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
         )
 
+    # Fichero temporal de salida
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Expresión de filtro del atlas: "refcat" = 'XXXX'
-    filter_expr = f'"refcat" = \'{refcat}\''
-
+    # Payload JSON para qgis_process (sin FILTER_EXPRESSION)
     payload = {
         "inputs": {
             "LAYOUT": QGIS_LAYOUT,
-            "FILTER_EXPRESSION": filter_expr,
             "OUTPUT": outpath,
         },
         "project_path": QGIS_PROJECT,
     }
     payload_json = json.dumps(payload)
 
-    cmd = [
+    cmd: List[str] = [
         "xvfb-run",
         "-a",
         "qgis_process",
@@ -124,56 +104,43 @@ def render(
         "-",        # lee JSON por stdin
     ]
 
-    try:
-        code, out, err = run_proc(cmd, stdin_text=payload_json)
-    except Exception as e:
-        # Cualquier excepción inesperada
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Exception in render()",
-                "exception": repr(e),
-                "cmd": " ".join(shlex.quote(c) for c in cmd),
-                "payload": payload,
-            },
-        )
+    extra_env = {
+        "REFCAT": refcat,
+    }
 
-    output_exists = os.path.exists(outpath)
-    output_size = os.path.getsize(outpath) if output_exists else 0
+    code, out, err = run_proc(cmd, extra_env=extra_env, stdin_text=payload_json)
 
-    # Si debug=1, siempre JSON (aunque haya PDF correcto)
+    # Modo debug: devolvemos toda la info
     if debug:
-        return JSONResponse(
-            status_code=200 if (code == 0 and output_exists and output_size > 0) else 500,
-            content={
-                "refcat": refcat,
-                "cmd": " ".join(shlex.quote(c) for c in cmd),
-                "stdout": out,
-                "stderr": err,
-                "exit_code": code,
-                "output_exists": output_exists,
-                "output_size": output_size,
-                "payload": payload,
-            },
-        )
+        info = {
+            "refcat": refcat,
+            "cmd": " ".join(shlex.quote(c) for c in cmd),
+            "stdout": out,
+            "stderr": err,
+            "exit_code": code,
+            "output_exists": os.path.exists(outpath),
+            "output_size": os.path.getsize(outpath) if os.path.exists(outpath) else 0,
+            "payload": payload,
+        }
+        return JSONResponse(info)
 
-    # Sin debug: solo PDF si todo OK; si no, JSON de error
-    if code != 0 or not output_exists or output_size == 0:
+    # Errores o PDF vacío
+    if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
         return JSONResponse(
             status_code=500,
             content={
                 "error": "qgis_process failed",
-                "refcat": refcat,
                 "cmd": " ".join(shlex.quote(c) for c in cmd),
                 "stdout": out,
                 "stderr": err,
                 "exit_code": code,
-                "output_exists": output_exists,
-                "output_size": output_size,
+                "output_exists": os.path.exists(outpath),
+                "output_size": os.path.getsize(outpath) if os.path.exists(outpath) else 0,
                 "payload": payload,
             },
         )
 
+    # OK -> devolvemos el PDF
     return FileResponse(
         outpath,
         media_type="application/pdf",
