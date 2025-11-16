@@ -8,10 +8,8 @@ from typing import List, Tuple, Optional
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 
-# Crear la app FastAPI
 app = FastAPI(title="QGIS Planos por refcat")
 
-# Configuración (sobrescribible con variables de entorno en Railway)
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT = os.getenv("QGIS_LAYOUT", "Plano_urbanistico_parcela")
 QGIS_ALGO = os.getenv("QGIS_ALGO", "native:atlaslayouttopdf")
@@ -21,7 +19,7 @@ def run_proc(
     cmd: List[str],
     extra_env: Optional[dict] = None,
     stdin_text: Optional[str] = None,
-    timeout: int = 300,
+    timeout: int = 180,
 ) -> Tuple[int, str, str]:
     """
     Ejecuta un comando y devuelve (returncode, stdout, stderr)
@@ -46,8 +44,7 @@ def run_proc(
         )
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
-        # Si QGIS se cuelga, devolvemos info de timeout
-        return 124, e.stdout or "", e.stderr or "Timeout expired"
+        return 124, e.stdout or "", (e.stderr or "") + "\n[TIMEOUT EXPIRED]"
 
 
 @app.get("/health")
@@ -87,28 +84,27 @@ def list_algos(filter: Optional[str] = None):
 
 
 @app.get("/render")
-def render(refcat: str = Query(..., min_length=3)):
+def render(
+    refcat: str = Query(..., min_length=3),
+    debug: bool = Query(False),
+):
     """
     Genera el PDF del atlas para la parcela cuyo refcat se pasa.
-    El layout tiene un atlas activo con capa de cobertura = 'parcelas'.
-    Aquí filtramos el atlas con FILTER_EXPRESSION para ese refcat.
+    Si debug=1, devuelve siempre JSON con info detallada en vez de PDF.
     """
 
-    # Comprobar que el proyecto existe
     if not os.path.exists(QGIS_PROJECT):
         return JSONResponse(
             status_code=500,
             content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
         )
 
-    # Fichero temporal de salida
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
     # Expresión de filtro del atlas: "refcat" = 'XXXX'
     filter_expr = f'"refcat" = \'{refcat}\''
 
-    # Payload JSON para qgis_process
     payload = {
         "inputs": {
             "LAYOUT": QGIS_LAYOUT,
@@ -119,37 +115,65 @@ def render(refcat: str = Query(..., min_length=3)):
     }
     payload_json = json.dumps(payload)
 
-    # Comando qgis_process: lee parámetros desde JSON por stdin
-    cmd: List[str] = [
+    cmd = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
         QGIS_ALGO,  # native:atlaslayouttopdf
-        "-",        # leer JSON de stdin
+        "-",        # lee JSON por stdin
     ]
 
-    code, out, err = run_proc(cmd, stdin_text=payload_json)
-
-    # Si falla o el PDF está vacío, devolvemos info de debug
-    if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
+    try:
+        code, out, err = run_proc(cmd, stdin_text=payload_json)
+    except Exception as e:
+        # Cualquier excepción inesperada
         return JSONResponse(
             status_code=500,
             content={
-                "error": "qgis_process failed",
+                "error": "Exception in render()",
+                "exception": repr(e),
                 "cmd": " ".join(shlex.quote(c) for c in cmd),
-                "stdout": out,
-                "stderr": err,
-                "exit_code": code,
-                "output_exists": os.path.exists(outpath),
-                "output_size": os.path.getsize(outpath)
-                if os.path.exists(outpath)
-                else 0,
                 "payload": payload,
             },
         )
 
-    # Si todo va bien, devolvemos el PDF
+    output_exists = os.path.exists(outpath)
+    output_size = os.path.getsize(outpath) if output_exists else 0
+
+    # Si debug=1, siempre JSON (aunque haya PDF correcto)
+    if debug:
+        return JSONResponse(
+            status_code=200 if (code == 0 and output_exists and output_size > 0) else 500,
+            content={
+                "refcat": refcat,
+                "cmd": " ".join(shlex.quote(c) for c in cmd),
+                "stdout": out,
+                "stderr": err,
+                "exit_code": code,
+                "output_exists": output_exists,
+                "output_size": output_size,
+                "payload": payload,
+            },
+        )
+
+    # Sin debug: solo PDF si todo OK; si no, JSON de error
+    if code != 0 or not output_exists or output_size == 0:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "qgis_process failed",
+                "refcat": refcat,
+                "cmd": " ".join(shlex.quote(c) for c in cmd),
+                "stdout": out,
+                "stderr": err,
+                "exit_code": code,
+                "output_exists": output_exists,
+                "output_size": output_size,
+                "payload": payload,
+            },
+        )
+
     return FileResponse(
         outpath,
         media_type="application/pdf",
