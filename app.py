@@ -12,13 +12,13 @@ from fastapi.responses import (
     JSONResponse,
 )
 
-# 1️⃣ Crear la app
+#1️⃣ Crear la app
 app = FastAPI(title="QGIS Planos por refcat")
 
 # 2️⃣ Configuración básica (sobrescribible con variables de entorno en Railway)
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
-# 👇 IMPORTANTE: ahora usamos el algoritmo de atlas
+# IMPORTANTE: usar el algoritmo de ATLAS
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:atlaslayouttopdf")
 
 
@@ -102,8 +102,8 @@ def render(
     refcat: str = Query(..., min_length=3),
 ):
     """
-    Genera el PDF del plano urbanístico para la parcela cuyo refcat se pasa.
-    En el layout, el Atlas debe tener el filtro:  "refcat" = env('REFCAT')
+    Genera el PDF del atlas para la parcela cuyo refcat se pasa.
+    El filtro de atlas se pasa al algoritmo como FILTER_EXPRESSION.
     """
 
     # Comprobar que el proyecto existe
@@ -117,35 +117,35 @@ def render(
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # 🔹 Payload JSON para qgis_process (modo stdin)
-    #   Para native:atlaslayouttopdf la doc dice que los parámetros básicos son:
-    #   LAYOUT y OUTPUT; el atlas del propio layout se respeta tal cual. :contentReference[oaicite:2]{index=2}
+    # Expresión QGIS para filtrar la capa de cobertura:
+    # "refcat" = '4056301QJ3245N'
+    filter_expr = f"\"refcat\" = '{refcat}'"
+
+    # Payload JSON para qgis_process (modo stdin)
     payload = {
         "inputs": {
             "LAYOUT": QGIS_LAYOUT,
             "OUTPUT": outpath,
-            # Si quisieras SOBREESCRIBIR el filtro de atlas desde aquí:
-            # "FILTER_EXPRESSION": "\"refcat\" = env('REFCAT')",
-            # pero no hace falta porque ya lo tienes puesto en el layout.
+            "FILTER_EXPRESSION": filter_expr,
+            # Si quisieras limitar a 1 feature explícitamente:
+            # "FEATURE_LIMIT": 1,
         },
         "project_path": QGIS_PROJECT,
     }
     payload_json = json.dumps(payload)
 
-    # Comando qgis_process: leemos el JSON de stdin (el '-' final)
+    # Comando qgis_process: leer parámetros desde JSON por stdin
     cmd: List[str] = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
         QGIS_ALGO,   # native:atlaslayouttopdf
-        "-",         # ← leer parámetros desde JSON por stdin
+        "-",         # ← leer JSON de stdin
     ]
 
-    # Variable de entorno para el filtro del Atlas ("refcat" = env('REFCAT'))
-    extra_env = {
-        "REFCAT": refcat,
-    }
+    # Ya no necesitamos REFCAT como env; todo va en FILTER_EXPRESSION
+    extra_env = {}
 
     code, out, err = run_proc(cmd, extra_env=extra_env, stdin_text=payload_json)
 
