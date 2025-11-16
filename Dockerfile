@@ -1,4 +1,3 @@
-# Imagen base Ubuntu + QGIS (headless)
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,14 +11,12 @@ RUN apt-get update && apt-get install -y \
        fonts-dejavu-core \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Entorno gráfico offscreen y runtime
 ENV QT_QPA_PLATFORM=offscreen
 ENV XDG_RUNTIME_DIR=/tmp/runtime-root
 RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
 
 WORKDIR /app
 
-# Solo copiamos lo que realmente usamos
 COPY proyecto.qgz /app/proyecto.qgz
 COPY app.py       /app/app.py
 
