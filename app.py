@@ -11,10 +11,10 @@ from fastapi.responses import (
     JSONResponse,
 )
 
-# 1️⃣ Crear la app ANTES de usar @app.get
+# 1️⃣ Crear la app
 app = FastAPI(title="QGIS Planos por refcat")
 
-# 2️⃣ Configuración básica
+# 2️⃣ Configuración básica (sobrescribible con variables de entorno en Railway)
 QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:printlayouttopdf")
@@ -104,15 +104,16 @@ def render(
     fd, outpath = tempfile.mkstemp(suffix=".pdf")
     os.close(fd)
 
-    # Comando qgis_process SIN --project-path
+    # Comando qgis_process: pasamos PROJECT_PATH como parámetro del algoritmo
     cmd: List[str] = [
         "xvfb-run",
         "-a",
         "qgis_process",
         "run",
-        QGIS_ALGO,            # native:printlayouttopdf
-        "--",                 # parámetros del algoritmo
-        f"LAYOUT={QGIS_LAYOUT}",
+        QGIS_ALGO,                         # native:printlayouttopdf
+        "--",                              # parámetros del algoritmo
+        f"PROJECT_PATH={QGIS_PROJECT}",    # proyecto QGIS
+        f"LAYOUT={QGIS_LAYOUT}",           # nombre del layout
         "DPI=300",
         "FORCE_VECTOR_OUTPUT=false",
         "GEOREFERENCE=true",
@@ -121,7 +122,7 @@ def render(
 
     # Variables de entorno:
     # - REFCAT para el filtro del Atlas ("refcat" = env('REFCAT'))
-    # - QGIS_PROJECT_FILE para que QGIS sepa qué proyecto cargar
+    # - QGIS_PROJECT_FILE es opcional, pero no molesta
     extra_env = {
         "REFCAT": refcat,
         "QGIS_PROJECT_FILE": QGIS_PROJECT,
@@ -149,3 +150,5 @@ def render(
         media_type="application/pdf",
         filename=f"informe_{refcat}.pdf",
     )
+
+    
