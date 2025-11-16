@@ -18,10 +18,10 @@ RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
 
 WORKDIR /app
 
-# ⬇️ Proyecto, datos y app
+# Proyecto, datos y API
 COPY proyecto.qgz /app/proyecto.qgz
-COPY parcela.gpkg  /app/parcela.gpkg   # ← asegúrate de que el nombre coincide
-COPY app.py        /app/app.py
+COPY parcela.gpkg /app/parcela.gpkg
+COPY app.py       /app/app.py
 
 # Dependencias Python
 RUN pip3 install fastapi uvicorn[standard] pydantic
@@ -30,4 +30,3 @@ ENV PORT=8080
 EXPOSE 8080
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
-
