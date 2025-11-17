@@ -19,7 +19,6 @@ QGIS_PROJECT = os.getenv("QGIS_PROJECT", "/app/proyecto.qgz")
 QGIS_LAYOUT  = os.getenv("QGIS_LAYOUT",  "Plano_urbanistico_parcela")
 QGIS_ALGO    = os.getenv("QGIS_ALGO",    "native:atlaslayouttoimage")
 
-
 def run_proc(
     cmd: List[str],
     extra_env: Optional[dict] = None,
@@ -42,7 +41,6 @@ def run_proc(
     )
     return p.returncode, p.stdout, p.stderr
 
-
 @app.get("/health")
 def health():
     return {
@@ -51,7 +49,6 @@ def health():
         "layout": QGIS_LAYOUT,
         "algo": QGIS_ALGO,
     }
-
 
 @app.get("/qgis")
 def qgis_info():
@@ -62,7 +59,6 @@ def qgis_info():
         "stderr": err,
     }
 
-
 @app.get("/algos", response_class=PlainTextResponse)
 def list_algos(filter: str | None = None):
     code, out, err = run_proc(["qgis_process", "list"])
@@ -71,13 +67,10 @@ def list_algos(filter: str | None = None):
             f"ERROR list:\nSTDOUT:\n{out}\n\nSTDERR:\n{err}",
             status_code=500,
         )
-
     if filter:
         lines = [ln for ln in out.splitlines() if filter.lower() in ln.lower()]
         return PlainTextResponse("\n".join(lines) or "(sin coincidencias)")
-
     return PlainTextResponse(out)
-
 
 @app.get("/render")
 def render(
@@ -90,14 +83,13 @@ def render(
             content={"error": "Proyecto no encontrado", "path": QGIS_PROJECT},
         )
 
-    fd, outpath = tempfile.mkstemp(suffix=".png")
-    os.close(fd)
+    outdir = tempfile.mkdtemp()
 
     payload = {
         "inputs": {
             "LAYOUT": QGIS_LAYOUT,
             "FILTER_EXPRESSION": f'"refcat" = \'{refcat}\'',
-            "OUTPUT": outpath,
+            "FOLDER": outdir,
         },
         "project_path": QGIS_PROJECT,
     }
@@ -108,7 +100,7 @@ def render(
         "-a",
         "qgis_process",
         "run",
-        QGIS_ALGO,  # native:atlaslayouttoimage
+        QGIS_ALGO,
         "-",
     ]
 
@@ -116,7 +108,11 @@ def render(
 
     code, out, err = run_proc(cmd, extra_env=extra_env, stdin_text=payload_json)
 
-    if code != 0 or not os.path.exists(outpath) or os.path.getsize(outpath) == 0:
+    # Buscar archivo generado en la carpeta
+    img_files = [f for f in os.listdir(outdir) if f.endswith(".png")]
+    img_path = os.path.join(outdir, img_files[0]) if img_files else None
+
+    if code != 0 or not img_path or not os.path.exists(img_path):
         return JSONResponse(
             status_code=500,
             content={
@@ -125,14 +121,14 @@ def render(
                 "stdout": out,
                 "stderr": err,
                 "exit_code": code,
-                "output_exists": os.path.exists(outpath),
-                "output_size": os.path.getsize(outpath) if os.path.exists(outpath) else 0,
+                "output_exists": bool(img_path),
+                "output_size": os.path.getsize(img_path) if img_path else 0,
                 "payload": payload,
             },
         )
 
     return FileResponse(
-        outpath,
+        img_path,
         media_type="image/png",
         filename=f"informe_{refcat}.png",
     )
